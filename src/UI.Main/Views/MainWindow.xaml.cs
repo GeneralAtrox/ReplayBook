@@ -22,6 +22,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Threading;
 
 /// <summary>
@@ -126,11 +127,48 @@ public partial class MainWindow : Window
         }
     }
 
+    private bool _groupingConfigured;
+
     private async void ReplayListView_Loaded(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel context) { return; }
 
+        // Configure per-build grouping + "playable first, then name" sorting before loading.
+        ApplyGroupingAndSort(context);
+
         await context.ReloadReplayList(false).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Groups the replay list into a collapsible section ("dropdown") per game build, and orders the
+    /// list so playable replays come first, then by build, then by replay name. This is done on the
+    /// client (not the database query) because "is playable" is derived from the installed
+    /// executables - it is not a stored field.
+    /// </summary>
+    private void ApplyGroupingAndSort(MainWindowViewModel context)
+    {
+        // The descriptions live on the collection's default view, which is shared and survives the
+        // PreviewReplays.Clear()/reload cycle, so we only need to set this up once.
+        if (_groupingConfigured) { return; }
+
+        ICollectionView view = CollectionViewSource.GetDefaultView(context.PreviewReplays);
+        if (view == null) { return; }
+
+        using (view.DeferRefresh())
+        {
+            view.GroupDescriptions.Clear();
+            view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ReplayPreview.GameVersionString)));
+
+            view.SortDescriptions.Clear();
+            // 1) playable replays first (true sorts ahead of false when descending)
+            view.SortDescriptions.Add(new SortDescription(nameof(ReplayPreview.IsSupported), ListSortDirection.Descending));
+            // 2) keep each build's replays contiguous and order the build groups
+            view.SortDescriptions.Add(new SortDescription(nameof(ReplayPreview.GameVersionString), ListSortDirection.Descending));
+            // 3) by replay name within a build
+            view.SortDescriptions.Add(new SortDescription(nameof(ReplayPreview.DisplayName), ListSortDirection.Ascending));
+        }
+
+        _groupingConfigured = true;
     }
 
     private async void ReplayListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -180,44 +218,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SortButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel context) { return; }
-        if (sender is not Button sortButton) { return; }
-
-        // Get the button and menu
-        ContextMenu contextMenu = sortButton.ContextMenu;
-        // Set placement and open
-        contextMenu.PlacementTarget = sortButton;
-        contextMenu.Placement = PlacementMode.Bottom;
-        contextMenu.IsOpen = true;
-
-        string name = Enum.GetName(context.SortParameters.SortMethod.GetType(), context.SortParameters.SortMethod);
-        if (FindName(name) is RadioMenuItem selectItem)
-        {
-            // Select our item
-            selectItem.IsChecked = true;
-        }
-    }
-
-    /// <summary>
-    /// Sort menu item click handler
-    /// </summary>
-    /// <param name="sender"></param>
-    /// <param name="e"></param>
-    private async void MenuItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainWindowViewModel context) { return; }
-        if (sender is not RadioMenuItem selectedItem) { return; }
-
-        if (Enum.TryParse(selectedItem.Name, out SortMethod selectSort))
-        {
-            context.SortParameters.SortMethod = selectSort;
-        }
-
-        await context.ReloadReplayList(false).ConfigureAwait(false);
-    }
-
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainWindowViewModel context) { return; }
@@ -234,14 +234,9 @@ public partial class MainWindow : Window
     {
         if (DataContext is not MainWindowViewModel) { return; }
 
-        // If we scrolled at all...
-        if (Math.Abs(e.VerticalChange) > 0)
-        {
-            // If we reached the end, show the button!!!
-            ReplayPageBar.Visibility = e.VerticalOffset + e.ViewportHeight == e.ExtentHeight
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
+        // All replays are now loaded up-front (so the per-build groups are complete), so there is
+        // never another page to fetch - keep the "load more" bar hidden.
+        ReplayPageBar.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>

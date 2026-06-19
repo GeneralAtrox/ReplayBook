@@ -386,9 +386,23 @@ public class MainWindowViewModel
         // Discover and load replays into database, results are files that failed to load
         _ = await _fileManager.InitialLoadAsync().ConfigureAwait(true);
 
-        // Load from database into our viewmodel
+        // Load ALL replays from the database into our viewmodel. We load every page up-front
+        // (instead of one page at a time) so the per-build groups and the "playable first" ordering
+        // are complete - both are computed on the client and cannot be expressed by the paged query.
         int searchResults = -1;
-        await Task.Run(() => (_, searchResults, _) = LoadReplaysFromDatabase(true));
+        await Task.Run(() =>
+        {
+            bool resetSearch = true;
+            int received;
+            do
+            {
+                int pageTotal;
+                (received, pageTotal, _) = LoadReplaysFromDatabase(resetSearch);
+                searchResults = pageTotal;
+                resetSearch = false;
+            }
+            while (received > 0);
+        });
 
         // Load thumbnails
         StatusBarModel.StatusMessage = Application.Current.TryFindResource("LoadingMessageThumbnails") as string;

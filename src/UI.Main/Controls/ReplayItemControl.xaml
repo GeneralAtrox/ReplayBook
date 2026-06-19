@@ -18,6 +18,18 @@
           MouseLeave="Grid_MouseLeave"
           MouseRightButtonUp="UIElement_OnMouseRightButtonUp">
 
+        <!--  Darken/grey out replays that cannot be played (no installed game version for this patch)  -->
+        <Grid.Style>
+            <Style TargetType="Grid">
+                <Setter Property="Opacity" Value="1" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding Path=IsSupported}" Value="False">
+                        <Setter Property="Opacity" Value="0.45" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Grid.Style>
+
         <Grid.ContextMenu>
             <ContextMenu x:Name="DockPanelReplayContextMenu"
                          ContextMenuOpening="DockPanelReplayContextMenu_ContextMenuOpening"
