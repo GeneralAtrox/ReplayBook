@@ -48,6 +48,31 @@ public class FileManager
     public void DeleteSearchIndex() => _search.DeleteIndex();
 
     /// <summary>
+    /// ReplayBook only ever reads replay files, but the underlying ReplayReader opens them with
+    /// FileAccess.ReadWrite. That throws UnauthorizedAccessException for read-only files (e.g. ones
+    /// under Perforce/version control, or copied off read-only media). Replays are never written
+    /// while reading, so best-effort clear the read-only attribute before handing off the path.
+    /// </summary>
+    private void TryClearReadOnly(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if (attributes.HasFlag(FileAttributes.ReadOnly))
+            {
+                File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+                _log.Information($"Cleared read-only attribute on {path}");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: if we cannot clear it (e.g. an actual ACL denial), the read attempt will
+            // surface the real error through the normal error-handling path below.
+            _log.Warning($"Could not clear read-only attribute on {path}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// This function is responsible for finding and loading in new replays
     /// </summary>
     public async Task<IEnumerable<ReplayErrorInfo>> InitialLoadAsync()
@@ -64,38 +89,64 @@ public class FileManager
         // Check if file exists in the database
         foreach (ReplayFileInfo file in allFiles)
         {
-            if (_db.GetFileResult(file.Path) == null)
-            {
-                try
-                {
-                    var parseResult = await ReplayReader.ReadReplayAsync(file.Path, _readerOptions);
-                    var replayFile = new ReplayFile(file.Path, parseResult);
-                    var newResult = new FileResult(file, replayFile)
-                    {
-                        IsNewFile = false
-                    };
+            FileResult existing = _db.GetFileResult(file.Path);
 
-                    _db.AddFileResult(newResult);
-                    _search.AddDocument(newResult);
-                }
-                catch (Exception ex)
+            // Already parsed successfully - nothing to do.
+            if (existing != null && existing.ErrorInfo == null)
+            {
+                continue;
+            }
+
+            // A non-null entry at this point is a previously cached *error*. Retry it rather than
+            // leaving the failure cached forever - otherwise fixing the underlying problem (e.g.
+            // clearing a read-only flag) has no effect until the user manually wipes the cache.
+            bool isRetry = existing != null;
+
+            try
+            {
+                // ReplayReader opens the file ReadWrite; make sure a read-only flag won't block us.
+                TryClearReadOnly(file.Path);
+
+                var parseResult = await ReplayReader.ReadReplayAsync(file.Path, _readerOptions);
+                var replayFile = new ReplayFile(file.Path, parseResult);
+                var newResult = new FileResult(file, replayFile)
                 {
-                    // if parsing file failed for any reason, save info
-                    _log.Warning($"Failed to parse file: {file.Path}");
-                    _log.Warning(ex.ToString());
-                    var errorInfo = new ReplayErrorInfo
-                    {
-                        FilePath = file.Path,
-                        ExceptionType = ex.GetType().FullName,
-                        ExceptionString = ex.ToString(),
-                        ExceptionCallStack = ex.StackTrace
-                    };
+                    IsNewFile = false
+                };
+
+                if (isRetry)
+                {
+                    // Drop the stale error entry before recording the successful parse.
+                    _log.Information($"Previously-errored replay now loads, refreshing cache: {file.Path}");
+                    _db.RemoveFileResult(file.Path);
+                    _search.RemoveDocument(file.Path);
+                }
+
+                _db.AddFileResult(newResult);
+                _search.AddDocument(newResult);
+            }
+            catch (Exception ex)
+            {
+                // if parsing file failed for any reason, save info
+                _log.Warning($"Failed to parse file: {file.Path}");
+                _log.Warning(ex.ToString());
+                var errorInfo = new ReplayErrorInfo
+                {
+                    FilePath = file.Path,
+                    ExceptionType = ex.GetType().FullName,
+                    ExceptionString = ex.ToString(),
+                    ExceptionCallStack = ex.StackTrace
+                };
+
+                // On a retry the error entry is already cached; only record it the first time.
+                if (!isRetry)
+                {
                     var errorFileResult = new FileResult(file, errorInfo);
                     _db.AddFileResult(errorFileResult);
                     _search.AddDocument(errorFileResult);
-
-                    errorResults.Add(errorInfo);
                 }
+
+                errorResults.Add(errorInfo);
             }
         }
 
@@ -113,11 +164,14 @@ public class FileManager
         // File exists in the database, return now
         if (returnValue != null)
         {
-            _log.Information($"File {path} already exists in database. Match ID: {returnValue.ReplayFile.MatchId}");
+            _log.Information($"File {path} already exists in database. Match ID: {returnValue.ReplayFile?.MatchId}");
             return returnValue;
         }
 
         var replayFileInfo = _fileSystem.GetSingleReplayFileInfo(path);
+
+        // ReplayReader opens the file ReadWrite; clear a read-only flag so the read isn't denied.
+        TryClearReadOnly(path);
         var parseResult = await ReplayReader.ReadReplayAsync(path, _readerOptions);
 
         if (parseResult is null) return null;
