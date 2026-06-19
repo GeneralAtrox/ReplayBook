@@ -61,55 +61,16 @@
                                            QuerySubmitted="SearchBox_QuerySubmitted" />
                     </Border>
 
-                    <Grid Grid.Column="1">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Button x:Name="SortButton"
-                                Grid.Column="0"
-                                Width="37"
-                                Background="Transparent"
-                                Click="SortButton_Click"
-                                ContextMenuService.Placement="Bottom"
-                                ToolTip="{DynamicResource SortToolTip}">
-                            <ui:PathIcon Data="{StaticResource SortPathIcon}" />
-                            <Button.ContextMenu>
-                                <ContextMenu x:Name="SortMenu">
-                                    <ui:RadioMenuItem x:Name="NameAsc"
-                                                      Click="MenuItem_Click"
-                                                      Header="{DynamicResource NameAsc}" />
-                                    <ui:RadioMenuItem x:Name="NameDesc"
-                                                      Click="MenuItem_Click"
-                                                      Header="{DynamicResource NameDesc}" />
-                                    <Separator />
-                                    <ui:RadioMenuItem x:Name="DateAsc"
-                                                      Click="MenuItem_Click"
-                                                      Header="{DynamicResource DateAsc}" />
-                                    <ui:RadioMenuItem x:Name="DateDesc"
-                                                      Click="MenuItem_Click"
-                                                      Header="{DynamicResource DateDesc}" />
-                                    <Separator />
-                                    <ui:RadioMenuItem x:Name="SizeAsc"
-                                                      Click="MenuItem_Click"
-                                                      Header="{DynamicResource SizeAsc}" />
-                                    <ui:RadioMenuItem x:Name="SizeDesc"
-                                                      Click="MenuItem_Click"
-                                                      Header="{DynamicResource SizeDesc}" />
-                                </ContextMenu>
-                            </Button.ContextMenu>
-                        </Button>
-
-                        <Button x:Name="SettingsButton"
-                                Grid.Column="1"
-                                Width="37"
-                                Margin="0,5,5,5"
-                                Background="Transparent"
-                                Click="SettingsButton_Click"
-                                ToolTip="{DynamicResource SettingsToolTip}">
-                            <ui:PathIcon Data="{StaticResource SettingsPathIcon}" />
-                        </Button>
-                    </Grid>
+                    <!--  Replays are grouped per build and sorted playable-first, then by name (see ApplyGroupingAndSort), so the manual sort dropdown is no longer used.  -->
+                    <Button x:Name="SettingsButton"
+                            Grid.Column="1"
+                            Width="37"
+                            Margin="0,5,5,5"
+                            Background="Transparent"
+                            Click="SettingsButton_Click"
+                            ToolTip="{DynamicResource SettingsToolTip}">
+                        <ui:PathIcon Data="{StaticResource SettingsPathIcon}" />
+                    </Button>
                 </Grid>
 
                 <Grid x:Name="ReplayStatusBar"
@@ -193,7 +154,8 @@
                           ItemsSource="{Binding Path=PreviewReplays}"
                           Loaded="ReplayListView_Loaded"
                           ScrollViewer.ScrollChanged="ReplayListView_ScrollChanged"
-                          SelectionChanged="ReplayListView_SelectionChanged">
+                          SelectionChanged="ReplayListView_SelectionChanged"
+                          VirtualizingPanel.IsVirtualizingWhenGrouping="True">
                     <ListView.ItemContainerStyle>
                         <Style BasedOn="{StaticResource DefaultListViewItemStyle}" TargetType="{x:Type ListViewItem}">
                             <Setter Property="BorderBrush" Value="{DynamicResource BaseBackground}" />
@@ -205,6 +167,58 @@
                             <controls:ReplayItemControl />
                         </DataTemplate>
                     </ListView.ItemTemplate>
+                    <!--  One collapsible section ("dropdown") per game build. Group key is GameVersionString ("Patch 13.8").  -->
+                    <ListView.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.ContainerStyle>
+                                <Style TargetType="{x:Type GroupItem}">
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="{x:Type GroupItem}">
+                                                <Expander Margin="0,2,0,0"
+                                                          Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}"
+                                                          IsExpanded="True">
+                                                    <Expander.Header>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock VerticalAlignment="Center"
+                                                                       FontSize="14"
+                                                                       FontWeight="SemiBold"
+                                                                       Text="{Binding Name}" />
+                                                            <TextBlock VerticalAlignment="Center"
+                                                                       Margin="6,0,0,0"
+                                                                       FontSize="12"
+                                                                       Opacity="0.7"
+                                                                       Text="{Binding ItemCount, StringFormat=({0})}" />
+                                                            <Border Margin="8,0,0,0"
+                                                                    Padding="5,0,5,1"
+                                                                    VerticalAlignment="Center"
+                                                                    Background="{DynamicResource BadgeBackground}"
+                                                                    CornerRadius="3">
+                                                                <Border.Style>
+                                                                    <Style TargetType="Border">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Items[0].IsSupported}" Value="False">
+                                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </Border.Style>
+                                                                <TextBlock FontSize="11"
+                                                                           Foreground="{DynamicResource SystemControlErrorTextForegroundBrush}"
+                                                                           Text="{DynamicResource ReplayUnsupported}" />
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </Expander.Header>
+                                                    <ItemsPresenter />
+                                                </Expander>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </GroupStyle.ContainerStyle>
+                        </GroupStyle>
+                    </ListView.GroupStyle>
                 </ListView>
 
                 <Grid x:Name="ReplayPageBar"
